@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+		<title>ATEM Auto-Iris</title>
+		<link rel="stylesheet" href="styles.css" />
+	</head>
+	<body>
+		<header>
+			<div class="brand">ATEM Auto-Iris</div>
+			<div id="connPill" class="pill off">Switcher: not connected</div>
+			<div id="videoPill" class="pill off">Video: none</div>
+			<button id="updPill" class="pill upd" hidden>Update available</button>
+			<div class="spacer"></div>
+			<button id="openSetup" class="ghost">Reference setup</button>
+			<div class="seg" id="modeSeg" title="What auto is allowed to change">
+				<button data-mode="iris">Iris</button>
+				<button data-mode="gain">Gain</button>
+				<button data-mode="both">Iris + Gain</button>
+			</div>
+			<div class="trim">
+				<span class="lbl">Show exposure</span>
+				<button id="trimDown" title="Darker  ( [ )">−</button>
+				<span id="trimVal">±0.0 st</span>
+				<button id="trimUp" title="Brighter  ( ] )">+</button>
+				<button id="trimReset" class="ghost small" title="Back to reference">0</button>
+			</div>
+			<label class="autoToggle" title="Master enable (A)">
+				<input type="checkbox" id="autoEnabled" />
+				<span class="track"><span class="knob"></span></span>
+				<span id="autoLabel">AUTO OFF</span>
+			</label>
+			<button id="freezeBtn" class="freeze" title="Stop all automatic changes now (Esc)">FREEZE</button>
+		</header>
+		<div id="frozenBanner" hidden>
+			<b>FROZEN</b> — this app is sending nothing to the cameras. Full control is on the ATEM panel / ATEM Software Control.
+			<button id="unfreezeBtn">Unfreeze</button>
+		</div>
+
+		<main>
+			<section id="viewer">
+				<div id="stage">
+					<video id="mv" autoplay muted playsinline></video>
+					<div id="noVideo">No multiview yet — choose a capture device on the right, or try Demo mode.</div>
+					<div id="overlay"></div>
+				</div>
+				<div id="demoBar" hidden>
+					<span class="lbl">DEMO switcher — Preview:</span>
+					<span id="demoPvw"></span>
+					<button id="demoCut" class="cut">CUT</button>
+					<button id="demoLight" class="ghost">Change lighting</button>
+					<button id="demoDim" class="ghost">Lights −3 st</button>
+					<button id="demoBright" class="ghost">Lights +3 st</button>
+					<button id="demoPanel" class="ghost">Simulate ATEM-panel iris move</button>
+				</div>
+			</section>
+
+			<aside id="panel">
+				<section class="card">
+					<h3>Video in</h3>
+					<div class="row">
+						<select id="deviceSelect"></select>
+						<button id="refreshDevices" class="ghost small" title="Rescan devices">↻</button>
+					</div>
+					<div class="hint" id="deviceHint">Multiview from an UltraStudio / DeckLink, or the switcher's USB-C webcam output.</div>
+				</section>
+
+				<section class="card">
+					<h3>Switcher</h3>
+					<div class="row">
+						<input id="ipInput" placeholder="192.168.10.240" spellcheck="false" />
+						<button id="connectBtn">Connect</button>
+					</div>
+					<div class="row">
+						<button id="demoBtn" class="ghost">Demo mode (no hardware)</button>
+					</div>
+				</section>
+
+				<section class="card grow">
+					<h3>Cameras <span id="refInfo" class="muted"></span></h3>
+					<div id="camList"></div>
+				</section>
+
+				<details class="card">
+					<summary>Multiview mapping</summary>
+					<div class="row">
+						<label><input type="radio" name="mapMode" value="auto" checked /> From switcher</label>
+						<label><input type="radio" name="mapMode" value="manual" /> Manual</label>
+					</div>
+					<div class="row"><select id="layoutSelect"></select></div>
+					<div id="tileMap"></div>
+					<div class="hint">Each tile on the video shows which input it's measuring. If one is wrong, switch to Manual and fix it here.</div>
+				</details>
+
+				<details class="card">
+					<summary>Tuning</summary>
+					<div id="tuning"></div>
+					<div class="row"><button id="tuneReset" class="ghost small">Reset to defaults</button><button id="relearn" class="ghost small" title="Use after changing lenses">Re-learn lenses</button></div>
+				</details>
+
+				<details class="card" id="updCard">
+					<summary>App updates <span id="updBadge" class="muted"></span></summary>
+					<div class="hint">Installed version <b id="appVersion">—</b></div>
+					<div class="row"><input id="updRepo" placeholder="GitHub repo, e.g. yourname/atem-auto-iris" spellcheck="false" /></div>
+					<div class="row"><input id="updToken" type="password" placeholder="Access token (only needed for a private repo)" spellcheck="false" /></div>
+					<div class="row">
+						<button id="updCheck" class="ghost">Check for updates</button>
+						<button id="updInstall" class="primary" hidden>Install update</button>
+					</div>
+					<div id="updStatus" class="hint"></div>
+					<pre id="updNotes" hidden></pre>
+				</details>
+
+				<section class="card log">
+					<h3>Activity</h3>
+					<div id="log"></div>
+				</section>
+			</aside>
+		</main>
+
+		<!-- ============================== SETUP ============================== -->
+		<div id="setup" class="modalWrap">
+			<div class="modal">
+				<div class="modalHead">
+					<h2>Reference exposure setup</h2>
+					<button id="closeSetup" class="ghost">Close</button>
+				</div>
+				<div class="setupGrid">
+					<div class="setupLeft">
+						<div class="stepTitle">1 · Sources</div>
+						<div class="row">
+							<select id="sDeviceSelect"></select>
+						</div>
+						<div class="row">
+							<input id="sIpInput" placeholder="Switcher IP" spellcheck="false" />
+							<button id="sConnectBtn">Connect</button>
+						</div>
+						<div class="row"><button id="sDemoBtn" class="ghost">Use demo mode instead</button></div>
+						<div id="sStatus" class="hint"></div>
+
+						<div class="stepTitle">2 · Reference camera</div>
+						<div class="row"><select id="refCam"></select></div>
+						<div class="hint">Pick the camera whose picture you'll set by eye. Every other camera is matched to it.</div>
+
+						<div class="stepTitle">3 · Set its iris until it looks right</div>
+						<div class="irisRow">
+							<button id="irisMinus" class="small">−</button>
+							<input type="range" id="refIris" min="0" max="1" step="0.005" />
+							<button id="irisPlus" class="small">+</button>
+							<span id="refIrisVal">—</span>
+						</div>
+						<div class="irisRow">
+							<span class="lbl">Gain</span>
+							<button id="refGainDown" class="small">−</button>
+							<b id="refGainVal">—</b>
+							<button id="refGainUp" class="small">+</button>
+							<span class="lbl">base gains are cleanest (0 / +18 dB)</span>
+						</div>
+						<div class="hint">You can also use the ATEM panel / ATEM Software Control — the meter follows either way.</div>
+
+						<div class="meters">
+							<div><span class="lbl">Brightness</span><b id="refLuma">—</b></div>
+							<div><span class="lbl">Clipped</span><b id="refClip">—</b></div>
+							<div><span class="lbl">Saved reference</span><b id="refSaved">none</b></div>
+						</div>
+
+						<div class="stepTitle">4 · Lock it in</div>
+						<div class="row">
+							<button id="setRef" class="primary">Set as reference</button>
+							<button id="startShow" class="ghost">Done — go to show view</button>
+						</div>
+					</div>
+					<div class="setupRight">
+						<canvas id="refView" width="960" height="540"></canvas>
+						<canvas id="refHist" width="960" height="120"></canvas>
+						<div class="hint">Centre of the frame counts most, like a centre-weighted meter. Red on the histogram = clipping.</div>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<script type="module" src="app.js"></script>
+	</body>
+</html>

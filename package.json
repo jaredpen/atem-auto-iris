@@ -1,0 +1,51 @@
+{
+  "name": "atem-auto-iris",
+  "productName": "ATEM Auto-Iris",
+  "version": "1.2.0",
+  "description": "Tally-aware automatic iris and gain matching for Blackmagic Studio cameras on an ATEM switcher",
+  "main": "main.mjs",
+  "private": true,
+  "author": "ATEM Auto-Iris",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.mjs",
+    "dist": "electron-builder --mac dir",
+    "install-app": "bash scripts/build-mac-app.sh"
+  },
+  "dependencies": {
+    "@atem-connection/camera-control": "^0.4.0",
+    "atem-connection": "^3.11.1"
+  },
+  "devDependencies": {
+    "electron": "^45.4.1",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "local.atem-auto-iris",
+    "productName": "ATEM Auto-Iris",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.mjs",
+      "preload.cjs",
+      "renderer/**/*",
+      "build/icon.png",
+      "package.json",
+      "CHANGELOG.md"
+    ],
+    "mac": {
+      "icon": "build/icon.png",
+      "category": "public.app-category.video",
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "extendInfo": {
+        "NSCameraUsageDescription": "ATEM Auto-Iris reads the ATEM multiview from your capture device to measure camera exposure.",
+        "NSLocalNetworkUsageDescription": "ATEM Auto-Iris talks to your ATEM switcher on the local network for tally and camera control."
+      }
+    },
+    "npmRebuild": false
+  },
+  "license": "MIT"
+}
