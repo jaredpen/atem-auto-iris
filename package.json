@@ -1,7 +1,7 @@
 {
   "name": "atem-auto-iris",
   "productName": "ATEM Auto-Iris",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Tally-aware automatic iris and gain matching for Blackmagic Studio cameras on an ATEM switcher",
   "main": "main.mjs",
   "private": true,

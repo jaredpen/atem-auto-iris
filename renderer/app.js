@@ -291,7 +291,9 @@ function tick() {
 	}
 
 	const ref = S.reference
-	for (const t of tiles) {
+	// Preview cameras first: they're next on air, so they get priority.
+	const ordered = [...tiles].sort((a, b) => !!sw.tally?.[b.source]?.preview - !!sw.tally?.[a.source]?.preview)
+	for (const t of ordered) {
 		const cam = t.source
 		const r = ctl.step({
 			cam,
@@ -321,15 +323,21 @@ async function sendActions(cam, r) {
 	const parts = []
 	try {
 		// Actions arrive in send order: gain first, then iris.
-		for (const a of r.actions) {
+		// When a gain change comes with an iris compensation, the pair is atomic: the iris always
+		// follows the gain (milliseconds later), even if the camera was cut to air in between —
+		// otherwise it could go on air with the new gain but without the matching iris.
+		for (let i = 0; i < r.actions.length; i++) {
+			const a = r.actions[i]
+			const compensation = i > 0
 			if (frozen) break
-			if (sw.tally?.[cam]?.program) {
-				log(`${camName(cam)} went on air — remaining changes cancelled`, 'warn')
+			if (!compensation && sw.tally?.[cam]?.program) {
+				log(`${camName(cam)} went on air — change cancelled`, 'warn')
 				break
 			}
 			const from = a.kind === 'gain' ? gainOf(cam) : irisOf(cam)
 			ctl.markCommanded(cam, a.value, performance.now(), a.kind)
-			const res = a.kind === 'gain' ? await setGain(cam, a.value, true) : await setIris(cam, a.value, true)
+			const auto = !compensation
+			const res = a.kind === 'gain' ? await setGain(cam, a.value, auto) : await setIris(cam, a.value, auto)
 			if (!res?.ok) {
 				if (res?.reason === 'on-air') log(`${camName(cam)} went on air — change blocked`, 'warn')
 				else if (res?.reason !== 'frozen') log(`${camName(cam)} ${a.kind} command failed: ${res?.reason}`, 'error')
@@ -351,7 +359,8 @@ function noteStatusChange(cam, r) {
 	if (prev === r.status) return
 	lastLoggedStatus[cam] = r.status
 	const n = camName(cam)
-	if (r.status === STATUS.PREVIEW_WARN) log(`${n} is on PREVIEW but ${fmtErr(r.errorStops)} off target — not adjusting (preview is locked)`, 'warn')
+	if (r.status === STATUS.PREVIEW_WARN)
+		log(`${n} is on PREVIEW and ${fmtErr(r.errorStops)} off target — ${r.detail ? `can't fix it (${STATUS_TEXT[r.detail] ?? r.detail})` : 'not adjusting (preview is locked)'}`, 'warn')
 	else if (r.status === STATUS.LIMIT_OPEN) log(`${n}: can't go brighter — ${S.controlMode === 'iris' ? 'iris fully open; add gain or remove ND' : S.controlMode === 'gain' ? 'gain at maximum; open iris or remove ND' : 'iris open and gain at maximum; remove ND or add light'}`, 'warn')
 	else if (r.status === STATUS.LIMIT_CLOSED) log(`${n}: can't go darker — ${S.controlMode === 'iris' ? 'iris fully closed; add ND or lower gain' : S.controlMode === 'gain' ? 'gain at minimum; close iris or add ND' : 'iris closed and gain at minimum; add ND'}`, 'warn')
 	else if (r.status === STATUS.NO_GAIN && autoEnabled) log(`${n}: no gain value from the switcher yet — set its gain once (here or on the panel)`, 'warn')
@@ -366,6 +375,7 @@ const STATUS_TEXT = {
 	[STATUS.ON_AIR]: 'ON AIR · locked',
 	[STATUS.PREVIEW_OK]: 'PREVIEW · ready',
 	[STATUS.PREVIEW_WARN]: 'PREVIEW · off target',
+	[STATUS.PREVIEW_ADJUSTING]: 'PREVIEW · adjusting',
 	[STATUS.HELD]: 'held',
 	[STATUS.AUTO_OFF]: 'auto off',
 	[STATUS.COOLDOWN]: 'just off air',
@@ -628,6 +638,7 @@ function renderMappingPanel() {
 
 const TUNING_FIELDS = [
 	['deadbandStops', 'On-target window (± stops)', 0.05],
+	['previewDeadbandStops', 'Preview on-target window (± stops)', 0.01],
 	['previewWarnStops', 'Preview warning beyond (stops)', 0.05],
 	['irisPerStop', 'Iris change per stop', 0.005],
 	['maxStep', 'Largest single iris move', 0.01],
@@ -679,6 +690,17 @@ function renderTuning() {
 		}
 		box.append(l, i)
 	}
+	const lp = document.createElement('span')
+	lp.textContent = 'Adjust the preview camera (priority)'
+	const cp = document.createElement('input')
+	cp.type = 'checkbox'
+	cp.checked = S.tuning.adjustPreview !== false
+	cp.onchange = () => {
+		S.tuning.adjustPreview = cp.checked
+		save()
+		log(cp.checked ? 'Preview camera: adjusted first, to a tighter target' : 'Preview camera: locked (only idle cameras are adjusted)')
+	}
+	box.append(lp, cp)
 	const l = document.createElement('span')
 	l.textContent = 'Invert iris direction'
 	const c = document.createElement('input')

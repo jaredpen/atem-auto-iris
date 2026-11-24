@@ -13,20 +13,21 @@ function lumaOf(cam) {
 	return Math.min(1, TARGET * Math.pow(2, 0.45 * stops))
 }
 
-function run({ cams, tallyAt, ms = 20000, auto = true, hold = {}, mode = 'iris', frozen = false }) {
+function run({ cams, tallyAt, ms = 20000, auto = true, hold = {}, mode = 'iris', frozen = false, tuning = T, step = 200 }) {
 	const ctl = new AutoIrisController()
 	const sent = []
 	const statuses = {}
-	for (let now = 0; now <= ms; now += 200) {
+	const statusAt = {}
+	for (let now = 0; now <= ms; now += step) {
 		for (const [id, cam] of Object.entries(cams)) {
 			const cid = Number(id)
 			ctl.addSample(cid, now, { valid: true, luma: lumaOf(cam), clipPct: 0 })
 			const tally = tallyAt(cid, now)
-			const r = ctl.step({ cam: cid, now, tally, iris: cam.iris, gain: cam.gain ?? 0, mode, frozen, hold: !!hold[cid], autoEnabled: auto, target: TARGET, offsetStops: 0, trimStops: 0, tuning: T })
+			const r = ctl.step({ cam: cid, now, tally, iris: cam.iris, gain: cam.gain ?? 0, mode, frozen, hold: !!hold[cid], autoEnabled: auto, target: TARGET, offsetStops: 0, trimStops: 0, tuning })
 			;(statuses[cid] ??= []).push(r.status)
 			for (const a of r.actions ?? []) {
 				assert.ok(!tally.program, `command sent to on-air camera ${cid} at ${now}`)
-				assert.ok(!tally.preview, `command sent to preview camera ${cid} at ${now}`)
+				if (tuning.adjustPreview === false) assert.ok(!tally.preview, `command sent to locked preview camera ${cid} at ${now}`)
 				sent.push({ cid, now, ...a })
 				ctl.markCommanded(cid, a.value, now, a.kind)
 				cam[a.kind] = a.value
@@ -49,9 +50,9 @@ test('on-air camera is never touched, even when badly exposed', () => {
 	assert.ok(statuses[1].every((s) => s === STATUS.ON_AIR))
 })
 
-test('preview camera is locked and warns', () => {
+test('preview lock option: preview camera is locked and warns', () => {
 	const cams = { 2: { scene: -2, iris: 0.5 } }
-	const { sent, statuses } = run({ cams, tallyAt: () => ({ program: false, preview: true }) })
+	const { sent, statuses } = run({ cams, tallyAt: () => ({ program: false, preview: true }), tuning: { ...T, adjustPreview: false } })
 	assert.equal(sent.length, 0)
 	assert.equal(statuses[2].at(-1), STATUS.PREVIEW_WARN)
 })
@@ -200,4 +201,31 @@ test('both: gain may go above +18 when the iris cannot cover it', () => {
 	run({ cams, tallyAt: () => ({}), mode: 'both', ms: 30000 })
 	assert.ok(cams[1].gain > 18, `gain ${cams[1].gain}`)
 	assert.ok(Math.abs(stopsError(lumaOf(cams[1]), TARGET)) <= T.deadbandStops + 0.05)
+})
+
+test('preview camera is adjusted to a tighter target', () => {
+	const cams = { 2: { scene: -2, iris: 0.5 } }
+	const { sent, statuses } = run({ cams, tallyAt: () => ({ program: false, preview: true }) })
+	assert.ok(sent.length > 0)
+	assert.equal(statuses[2].at(-1), STATUS.PREVIEW_OK)
+	assert.ok(Math.abs(stopsError(lumaOf(cams[2]), TARGET)) <= T.previewDeadbandStops + 0.01)
+})
+
+test('preview camera converges at least as fast as an idle one', () => {
+	const timeTo = (tally) => {
+		const cams = { 1: { scene: 2.5, iris: 0.5 } }
+		const { statuses } = run({ cams, tallyAt: () => tally, step: 50, ms: 8000 })
+		const ok = tally.preview ? STATUS.PREVIEW_OK : STATUS.OK
+		return statuses[1].indexOf(ok) * 50
+	}
+	const idle = timeTo({})
+	const pvw = timeTo({ preview: true })
+	assert.ok(pvw > 0 && pvw <= idle, `preview ${pvw} ms vs idle ${idle} ms`)
+})
+
+test('camera cut from preview to program stops being adjusted instantly', () => {
+	const cams = { 1: { scene: 3, iris: 0.5 } }
+	const tallyAt = (_c, now) => (now < 300 ? { preview: true } : { program: true })
+	const { sent } = run({ cams, tallyAt, ms: 5000 })
+	assert.ok(sent.every((s) => s.now < 300))
 })

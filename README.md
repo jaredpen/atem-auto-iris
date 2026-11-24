@@ -5,7 +5,7 @@ This Mac app keeps your Blackmagic Studio cameras matched to one reference expos
 | Tally | What the app does |
 |---|---|
 | **On air** (program tally) | Never touches the camera. This includes key, PiP and SuperSource sources, and cameras mid-transition. |
-| **Preview** | Locked. Shows a warning if the camera is still off target. |
+| **Preview** | **Adjusted first** (top priority), to a tighter target (±0.1 stop) with faster corrections, so it's ready before the cut. A warning shows if it can't be brought on target. |
 | **Idle** | Adjusts in small steps, waits for the picture to settle, measures again, and stops once on target. |
 
 ---
@@ -99,7 +99,8 @@ You can't install an update while AUTO is on, and you shouldn't do it during a s
 | Invert iris direction | off | Turn on if auto makes cameras darker when they should get brighter |
 
 ## 5. Things to know
-- **A camera on preview is locked.** If the lighting changes while it's there, the app warns you but doesn't correct it until it goes back to idle.
+- **The preview camera is adjusted live,** so the director may see it change on the preview monitor. To lock preview cameras instead (the old behaviour), untick **Adjust the preview camera (priority)** under Tuning.
+- **A gain change and its iris compensation are sent together,** milliseconds apart. If a camera is cut to air at that exact moment, the iris still follows the gain, so the exposure doesn't jump.
 - **The first time you connect,** a camera may show *waiting for iris/gain value* until that setting has been changed once, here or on the panel. The switcher only reports values after they've been set.
 - **Test before trusting it live.** On your first run, keep AUTO off and check three things: the tile labels match your cameras, tally shows correctly, and the iris and gain controls move the right camera.
 

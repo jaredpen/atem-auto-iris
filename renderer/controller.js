@@ -1,8 +1,9 @@
 // Tally-aware auto-exposure controller (iris and/or gain). Pure logic: no DOM, no network.
 //
 //   ON AIR  (program tally) → never touch the camera.
-//   PREVIEW (preview tally) → never touch the camera; warn if it's still off target.
-//   IDLE                    → small corrective steps, wait for the picture to settle, re-measure.
+//   PREVIEW (preview tally) → adjusted FIRST and to a tighter target, so it's ready before the cut.
+//                             (Optional: lock preview instead, with adjustPreview = false.)
+//   IDLE                    → corrective moves, wait for the picture to settle, re-measure.
 //
 // Modes:
 //   'iris' — iris only.
@@ -14,7 +15,11 @@ import { stopsError, trimmedTarget } from './analysis.js'
 
 export const DEFAULT_TUNING = {
 	deadbandStops: 0.15, // "close enough" — stop adjusting inside ±this
-	previewWarnStops: 0.3, // flag a camera that reaches preview further off than this
+	previewWarnStops: 0.3, // flag a preview camera that is further off than this and can't be fixed
+	adjustPreview: true, // false = lock preview cameras like on-air ones
+	previewDeadbandStops: 0.1, // tighter "on target" window for the preview camera
+	previewAggressiveness: 0.95, // preview camera: fix nearly all of the error in each move
+	previewMinSettleMs: 180, // preview camera: react sooner after a move
 	irisPerStop: 0.15, // starting guess: normalised iris change per stop. Learned per camera as it runs.
 	learnIris: true, // refine irisPerStop for each camera from how the picture actually responds
 	maxStep: 0.4, // largest single iris move
@@ -43,6 +48,7 @@ export const STATUS = {
 	ON_AIR: 'on-air',
 	PREVIEW_OK: 'preview-ok',
 	PREVIEW_WARN: 'preview-warn',
+	PREVIEW_ADJUSTING: 'preview-adjusting',
 	HELD: 'held',
 	AUTO_OFF: 'auto-off',
 	FROZEN: 'frozen',
@@ -220,7 +226,33 @@ export class AutoIrisController {
 	 * @returns { status, errorStops?, luma?, actions?: [{kind:'gain'|'iris', value}] }  (actions in send order)
 	 */
 	step(p) {
-		const t = p.tuning
+		const pv = !!p.tally?.preview && !p.tally?.program && p.tuning.adjustPreview !== false
+		if (!pv) return this.#step(p, p.tuning, false)
+		// Priority settings for the camera that's about to go on air.
+		const b = p.tuning
+		const t = {
+			...b,
+			deadbandStops: Math.min(b.deadbandStops, b.previewDeadbandStops ?? b.deadbandStops),
+			aggressiveness: Math.max(b.aggressiveness, b.previewAggressiveness ?? 0),
+			firstMoveAggressiveness: Math.max(b.firstMoveAggressiveness, (b.previewAggressiveness ?? 0) * 0.85),
+			minSettleMs: Math.min(b.minSettleMs, b.previewMinSettleMs ?? b.minSettleMs),
+		}
+		const r = this.#step(p, t, true)
+		r.preview = true
+		const working = [STATUS.ADJUSTING, STATUS.REBASING, STATUS.SETTLING, STATUS.MEASURING, STATUS.COOLDOWN].includes(r.status)
+		if (r.status === STATUS.OK) r.status = STATUS.PREVIEW_OK
+		else if (working) {
+			r.detail = r.status
+			r.status = STATUS.PREVIEW_ADJUSTING
+		} else if (r.errorStops != null && Math.abs(r.errorStops) > b.previewWarnStops) {
+			// can't fix it (held, frozen, auto off, at a limit, manual override…) — warn
+			r.detail = r.status
+			r.status = STATUS.PREVIEW_WARN
+		}
+		return r
+	}
+
+	#step(p, t, adjustingPreview) {
 		const mode = p.mode || 'iris'
 		const c = this.#cam(p.cam)
 		const program = !!p.tally?.program
@@ -236,7 +268,7 @@ export class AutoIrisController {
 			base.clipPct = shown.clipPct
 			if (target) base.errorStops = stopsError(shown.luma, target)
 		}
-		if (program || preview || p.hold || !p.autoEnabled || p.frozen) c.adjusting = false
+		if (program || (preview && !adjustingPreview) || p.hold || !p.autoEnabled || p.frozen) c.adjusting = false
 		const ips = c.ips ?? t.irisPerStop
 		base.irisPerStop = ips
 
@@ -254,8 +286,8 @@ export class AutoIrisController {
 
 		// 1. ON AIR — hard lock.
 		if (program) return { ...base, status: STATUS.ON_AIR }
-		// 2. PREVIEW — locked, but report whether it's ready.
-		if (preview) {
+		// 2. PREVIEW — locked (only when preview adjusting is switched off).
+		if (preview && !adjustingPreview) {
 			const warn = base.errorStops != null && Math.abs(base.errorStops) > t.previewWarnStops
 			return { ...base, status: warn ? STATUS.PREVIEW_WARN : STATUS.PREVIEW_OK }
 		}
